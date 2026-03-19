@@ -2,7 +2,7 @@
 
 # ======================================================
 # 🚀 Linkit2me Kernel Build Script for Samsung J320H
-# Optimized for osm0sis mkbootimg (Source Build)
+# Optimized for osm0sis mkbootimg (Auto-Clean & Build)
 # ======================================================
 
 # دالة إيقاف السكربت عند حدوث خطأ
@@ -18,21 +18,22 @@ export ARCH=arm
 export KBUILD_BUILD_USER="imad"
 export KBUILD_BUILD_HOST="Linkit2me-Lab"
 
-# مسار المترجم (Toolchain)
+# مسار المترجم
 TOOLCHAIN_PATH=$PWD/toolchain/bin/arm-linux-androideabi-
 export CROSS_COMPILE=$TOOLCHAIN_PATH
 
-# الملفات النشطة حالياً
+# الملفات النشطة
 BASE_CONFIG=j3x3g-dt_defconfig
 REC_CONFIG=recovery.config
 
-# --- 2. إعدادات البوت (مستخرجة من الـ Config الأصلي) ---
+# --- 2. إعدادات البوت ---
 BASE=0x80000000
 KERNEL_OFFSET=0x00008000
 RAMDISK_OFFSET=0x01000000
 TAGS_OFFSET=0x00000100
 PAGESIZE=2048
-CMDLINE="init=/sbin/init root=/dev/ram rw console=ttyS1,115200n8 mem=88M"
+# أضفنا selinux=permissive لضمان الإقلاع السلس
+CMDLINE="init=/sbin/init root=/dev/ram rw console=ttyS1,115200n8 mem=88M androidboot.selinux=permissive"
 
 # مسارات الملفات
 OUT_DIR="out"
@@ -77,21 +78,22 @@ if [ -f $OUT_DIR/arch/arm/boot/zImage ]; then
         popd > /dev/null
     fi
 
-    # 6.2 بناء أداة mkbootimg من سورس osm0sis (لحل مشكلة الـ 404)
-    if [ ! -f "toolchain/mkbootimg" ]; then
-        echo "--- 🛠️ Compiling mkbootimg from osm0sis source ---"
-        git clone https://github.com/osm0sis/mkbootimg.git mkbootimg_src
-        cd mkbootimg_src
-        make -j$(nproc --all) || abort
-        cp mkbootimg ../toolchain/mkbootimg
-        cd ..
-        rm -rf mkbootimg_src
-        chmod +x toolchain/mkbootimg
-    fi
+    # 6.2 بناء أداة mkbootimg (حذف النسخة القديمة المكسورة وبناء نسخة جديدة)
+    echo "--- 🛠️ Force building mkbootimg from source ---"
+    rm -f toolchain/mkbootimg   # حذف أي ملف 404 قديم
+    rm -rf mkbootimg_src        # تنظيف مجلد السورس القديم
+    
+    git clone https://github.com/osm0sis/mkbootimg.git mkbootimg_src || abort
+    cd mkbootimg_src
+    make mkbootimg -j$(nproc --all) || abort
+    cp mkbootimg ../toolchain/mkbootimg
+    cd ..
+    rm -rf mkbootimg_src
+    chmod +x toolchain/mkbootimg
+    echo "✅ New mkbootimg tool is ready."
 
     # 6.3 صناعة الـ boot.img النهائي
     echo "--- 🖼️ Creating final boot.img ---"
-    # ملحوظة: أجهزة سبريدترم تدمج الـ DT غالباً في نهاية الملف
     ./toolchain/mkbootimg \
         --kernel $OUT_DIR/arch/arm/boot/zImage \
         --ramdisk $RAMDISK_OUT \
@@ -103,17 +105,17 @@ if [ -f $OUT_DIR/arch/arm/boot/zImage ]; then
         --tags_offset $TAGS_OFFSET \
         -o $OUTPUT_BOOTIMG || abort
 
-    # دمج ملف الـ DT المخصص (مهم جداً للـ J320H)
+    # دمج ملف الـ DT وإضافة تذييل سامسونج
     if [ -f "$DT_FILE" ]; then
         echo "--- ➕ Appending Device Tree (DTB) ---"
         cat $DT_FILE >> $OUTPUT_BOOTIMG
-        # إضافة تذييل SEAndroid (اختياري لبعض الأنظمة)
         echo -n "SEANDROIDENFORCE" >> $OUTPUT_BOOTIMG
+        echo "✅ DTB and Footer added."
     fi
 
     echo "-----------------------------------------------"
     echo "🎉 SUCCESS! Your boot.img is ready."
-    echo "📊 Size: $(du -h $OUTPUT_BOOTIMG | cut -f1)"
+    echo "📊 Final Size: $(du -h $OUTPUT_BOOTIMG | cut -f1)"
     echo "-----------------------------------------------"
 else
     echo "❌ ERROR: Build failed."
