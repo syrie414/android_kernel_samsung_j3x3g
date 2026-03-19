@@ -68,29 +68,7 @@ jobs:
           echo "ERROR: zImage not found!" && exit 1
         fi
 
-    - name: Push Kernel to TWRP Device Tree
-      env:
-        GH_TOKEN: ${{ secrets.LINKIT }}
-      run: |
-        git config --global user.email "were.aksle@gmail.com"
-        git config --global user.name "Linkit2me"
-
-        # كلون للمستودع
-        git clone https://Linkit2me:${GH_TOKEN}@github.com/linkit2me/twrp_device_samsung_j3x3g.git -b twrp-5.1-1 twrp_tree
-        
-        mkdir -p twrp_tree/kernel
-        
-        # نسخ الكيرنل
-        cp out/arch/arm/boot/zImage twrp_tree/kernel/zImage
-        
-        # البحث عن ملف الـ DTB الصحيح ونسخه باسم dtb
-        # هاد الأمر رح يدور على أول ملف dtb بيطلع وينسخه لمجلد الريكفري فوراً
-        find out/arch/arm/boot/dts/ -name "*.dtb" -type f -exec cp {} twrp_tree/kernel/dtb \;
-
-        cd twrp_tree
-        git add kernel/zImage kernel/dtb
-        git commit -m "Auto-update kernel & dtb from Build Action [skip ci]" || echo "No changes"
-        git push origin twrp-5.1-1
+    
 
     - name: Upload Artifact
       uses: actions/upload-artifact@v4
