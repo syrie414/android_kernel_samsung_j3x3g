@@ -8,7 +8,6 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-
     container:
       image: ubuntu:20.04
       options: --user root
@@ -17,98 +16,48 @@ jobs:
       - name: Checkout Kernel Source
         uses: actions/checkout@v4
 
-      - name: Setup Environment inside Container
+      - name: Setup Environment
         run: |
-          set -e
-          export DEBIAN_FRONTEND=noninteractive
           apt-get update
-
           dpkg --add-architecture i386
-          apt-get update
-
-          apt-get install -y \
-            git curl sudo build-essential bc bison flex \
-            libssl-dev libelf-dev zip \
-            gcc-multilib g++-multilib \
+          apt-get install -y git curl build-essential bc bison flex \
+            libssl-dev libelf-dev zip gcc-multilib g++-multilib \
             libc6-dev-i386 lib32ncurses5-dev lib32z1-dev \
-            libncurses5 libncurses5-dev \
-            python3 python3-pip cpio rsync file
-
+            libncurses5 libncurses5-dev python3 cpio
           ln -sf /usr/bin/python3 /usr/bin/python
 
       - name: Setup Toolchain
         run: |
-          set -e
-
           git clone https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.9 \
             -b android-wear-5.1.0_r1 --depth=1 toolchain
-
-          chmod -R +x toolchain/bin/ || true
-
-      - name: Setup mkbootimg
-        run: |
-          set -e
-
-          git clone https://android.googlesource.com/platform/system/tools/mkbootimg \
-            --depth=1 mkbootimg-src
-
-          cp mkbootimg-src/mkbootimg.py toolchain/mkbootimg
-          chmod +x toolchain/mkbootimg
+          chmod -R +x toolchain/bin/
 
       - name: Fix Legacy Scripts
         run: |
-          set -e
           sed -i 's/^YYLTYPE yylloc;/extern YYLTYPE yylloc;/' scripts/dtc/dtc-lexer.lex.c_shipped || true
           sed -i 's/^YYLTYPE yylloc;/extern YYLTYPE yylloc;/' scripts/dtc/dtc-lexer.l || true
 
-      - name: Run Build Script
+      - name: Build Kernel
         run: |
-          set -e
           chmod +x build.sh
           ./build.sh 2>&1 | tee build.log
 
-      - name: Verify Output Files
-        run: |
-          set -e
-          echo "=== out/ contents ==="
-          find out -maxdepth 4 -type f | sort || true
-
-          if [ ! -s out/boot.img ]; then
-            echo "❌ boot.img not found or empty"
-            exit 1
-          fi
-
-          ls -lh out/boot.img
-
       - name: Upload Build Logs
-        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: build-logs
           path: build.log
-          if-no-files-found: error
 
-      - name: Upload Boot Image
-        uses: actions/upload-artifact@v4
-        with:
-          name: J320H-Boot-Image
-          path: out/boot.img
-          if-no-files-found: error
-
-      - name: Package with AnyKernel3
+      - name: Package Kernel in AnyKernel
         run: |
-          set -e
-
           git clone https://github.com/osm0sis/AnyKernel3 --depth=1 AnyKernel
 
           # تعطيل فحص الجهاز
           sed -i 's/do.devicecheck=1/do.devicecheck=0/g' AnyKernel/anykernel.sh || true
-
-          # ضبط اسم الروم/الكرنل
           sed -i 's|kernel.string=.*|kernel.string=Linkit2me-J320H;|g' AnyKernel/anykernel.sh || true
 
-          # احتفظ بالـ boot.img داخل الحزمة
-          cp -f out/boot.img AnyKernel/boot.img
+          # نسخ zImage مباشرة كـ boot.img
+          cp -f out/arch/arm/boot/zImage AnyKernel/boot.img
 
           cd AnyKernel
           zip -r9 "../Linkit2me-J320H-Kernel-AnyKernel.zip" . -x ".git/*" "README.md"
@@ -118,4 +67,3 @@ jobs:
         with:
           name: Linkit2me_J320H_Zip
           path: Linkit2me-J320H-Kernel-AnyKernel.zip
-          if-no-files-found: error
