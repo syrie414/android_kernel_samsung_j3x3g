@@ -79,13 +79,17 @@ if [ -f $OUT_DIR/arch/arm/boot/zImage ]; then
     fi
 
     # 6.2 بناء أداة mkbootimg (حذف النسخة القديمة المكسورة وبناء نسخة جديدة)
+        # 6.2 بناء أداة mkbootimg (استخدام المترجم المحلي للجهاز لضمان النجاح)
     echo "--- 🛠️ Force building mkbootimg from source ---"
-    rm -f toolchain/mkbootimg   # حذف أي ملف 404 قديم
-    rm -rf mkbootimg_src        # تنظيف مجلد السورس القديم
+    rm -f toolchain/mkbootimg
+    rm -rf mkbootimg_src
     
     git clone https://github.com/osm0sis/mkbootimg.git mkbootimg_src || abort
     cd mkbootimg_src
-    make mkbootimg -j$(nproc --all) || abort
+    
+    # السر هنا: نستخدم CC=gcc المحلي وليس الخاص بالأندرويد
+    make CC=gcc mkbootimg -j$(nproc --all) || abort
+    
     cp mkbootimg ../toolchain/mkbootimg
     cd ..
     rm -rf mkbootimg_src
