@@ -103,11 +103,12 @@ else
     abort
 fi
 
-# --- 7. التحقق من mkbootimg ---
-if [ ! -x "$MKBOOTIMG" ]; then
-    echo "❌ mkbootimg not found or not executable at $MKBOOTIMG"
-    abort
-fi
+# --- 7. التحقق من mkbootimg (معطل) ---
+# إذا كنت تستخدم zImage مباشرة مع AnyKernel3، لا حاجة لـmkbootimg
+# if [ ! -x "$MKBOOTIMG" ]; then
+#     echo "❌ mkbootimg not found or not executable at $MKBOOTIMG"
+#     abort
+# fi
 
 # --- 8. اختيار kernel image ---
 KERNEL_IMAGE="$OUT_DIR/arch/arm/boot/zImage"
