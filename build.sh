@@ -1,9 +1,13 @@
 #!/bin/bash
 
-# دالة إيقاف السكربت عند حدوث خطأ
+# ======================================================
+# 🚀 Linkit2me Kernel Build Script for Samsung J320H
+# ======================================================
+
+# دالة إيقاف السكربت عند حدوث خطأ مفاجئ
 abort() {
     echo "-----------------------------------------------"
-    echo "❌ Kernel compilation or packing failed! Exiting..."
+    echo "❌ BUILD FAILED! check logs for errors."
     echo "-----------------------------------------------"
     exit 1
 }
@@ -13,7 +17,7 @@ export ARCH=arm
 export KBUILD_BUILD_USER="imad"
 export KBUILD_BUILD_HOST="Linkit2me-Lab"
 
-# مسار المترجم (تأكد من وجوده)
+# مسار المترجم (Toolchain)
 TOOLCHAIN_PATH=$PWD/toolchain/bin/arm-linux-androideabi-
 export CROSS_COMPILE=$TOOLCHAIN_PATH
 
@@ -21,76 +25,77 @@ export CROSS_COMPILE=$TOOLCHAIN_PATH
 BASE_CONFIG=j3x3g-dt_defconfig
 REC_CONFIG=recovery.config
 
-# إعدادات معالج Spreadtrum SC8830 (J320H) لبناء الـ boot.img
-BASE=0x00000000
+# --- 2. إعدادات البوت (مستخرجة من الـ Config الأصلي) ---
+# العناوين الفيزيائية لمعالج Spreadtrum SC8830
+BASE=0x80000000
 KERNEL_OFFSET=0x00008000
 RAMDISK_OFFSET=0x01000000
 TAGS_OFFSET=0x00000100
-SECOND_OFFSET=0x00f00000
 PAGESIZE=2048
-CMDLINE="console=ttyS1,115200n8 loglevel=8 init=/init root=/dev/ram0 rw"
 
-# مسارات الملفات
+# الـ CMDLINE الدقيق للجهاز (تم تعديل الكونسول ليتوافق مع النسخ الحديثة)
+CMDLINE="init=/sbin/init root=/dev/ram rw console=ttyS1,115200n8 mem=88M"
+
+# مسارات الملفات والمجلدات
 OUT_DIR="out"
 RAMDISK_SRC="build/ramdisk"
 RAMDISK_OUT="$OUT_DIR/ramdisk.cpio.gz"
-DT_FILE="build/boot.img-dt" # تأكد أن هذا الملف موجود في المستودع
+DT_FILE="build/boot.img-dt" 
 OUTPUT_BOOTIMG="$OUT_DIR/boot.img"
 
-# --- 2. تنظيف البيئة ---
-echo "--- Cleaning build directory ---"
+# --- 3. تجهيز بيئة البناء ---
+echo "--- 🛠️ Cleaning and preparing build environment ---"
 rm -rf $OUT_DIR
 mkdir -p $OUT_DIR
+# التأكد من تنظيف السورس تماماً
 make O=$OUT_DIR mrproper || abort
 
-# --- 3. دمج الإعدادات (Base + Recovery) ---
-echo "--- Merging configs: $BASE_CONFIG + $REC_CONFIG ---"
+# --- 4. دمج الإعدادات (Kernel Configs) ---
 if [ ! -f arch/arm/configs/$BASE_CONFIG ]; then
-    echo "ERROR: Base config not found in arch/arm/configs/!" && abort
+    echo "❌ ERROR: Base config ($BASE_CONFIG) not found!" && abort
 fi
 
-# بناء الكونسفج الأساسي
+echo "--- 📝 Merging configs: $BASE_CONFIG ---"
 make O=$OUT_DIR $BASE_CONFIG || abort
 
-# دمج إعدادات الريكفري
+# دمج إعدادات الريكفري (إذا وجدت)
 if [ -f arch/arm/configs/$REC_CONFIG ]; then
-    echo "Applying Recovery Config patches..."
+    echo "--- 🩹 Applying Recovery patches from $REC_CONFIG ---"
     cat arch/arm/configs/$REC_CONFIG >> $OUT_DIR/.config
     make O=$OUT_DIR olddefconfig || abort
-else
-    echo "WARNING: Recovery config not found, skipping merge."
 fi
 
-# --- 4. بدء البناء الفعلي (Kernel + DTBs) ---
-echo "--- Starting Compilation for J320H ---"
+# --- 5. بدء عملية التجميع (Kernel + DTBs) ---
+echo "--- ⚡ Starting Compilation (this may take a few minutes) ---"
+# KCFLAGS="-fcommon" ضرورية لتجنب أخطاء تعريف المتغيرات في المترجمات الحديثة
 make O=$OUT_DIR KCFLAGS="-fcommon" HOSTCFLAGS="-fcommon" -j$(nproc --all) zImage dtbs || abort
 
-# --- 5. تجهيز Ramdisk وبناء boot.img ---
+# --- 6. تجميع الـ Boot Image ---
 echo "-----------------------------------------------"
 if [ -f $OUT_DIR/arch/arm/boot/zImage ]; then
     echo "✅ Kernel (zImage) built successfully."
-    
-    # التحقق من وجود مجلد الرامديسك
-    if [ ! -d "$RAMDISK_SRC" ]; then
-        echo "ERROR: Ramdisk folder not found at $RAMDISK_SRC!" && abort
+
+    # 6.1 ضغط الـ Ramdisk
+    if [ -d "$RAMDISK_SRC" ]; then
+        echo "--- 📦 Packing RAMDisk ---"
+        pushd $RAMDISK_SRC > /dev/null
+        find . ! -name . | LC_ALL=C sort | cpio -o -H newc -R root:root | gzip > ../../$RAMDISK_OUT || abort
+        popd > /dev/null
+        echo "✅ RAMDisk is ready."
+    else
+        echo "⚠️ WARNING: No ramdisk found in $RAMDISK_SRC, image might not boot!"
     fi
 
-    # 5.1 بناء الـ Ramdisk
-    echo "--- Packing RAMDisk ---"
-    pushd $RAMDISK_SRC > /dev/null
-    find . ! -name . | LC_ALL=C sort | cpio -o -H newc -R root:root | gzip > ../../$RAMDISK_OUT || abort
-    popd > /dev/null
-    echo "✅ RAMDisk packed successfully."
-
-    # 5.2 التحقق من وجود mkbootimg وتنزيله إذا لزم الأمر
+    # 6.2 التأكد من أداة mkbootimg
     if [ ! -f "toolchain/mkbootimg" ]; then
-        echo "Downloading mkbootimg..."
+        echo "--- 📥 Downloading mkbootimg ---"
         curl -sL https://raw.githubusercontent.com/osm0sis/mkbootimg/master/mkbootimg -o toolchain/mkbootimg
         chmod +x toolchain/mkbootimg
     fi
 
-    # 5.3 بناء boot.img
-    echo "--- Creating boot.img ---"
+    # 6.3 صناعة الـ boot.img النهائي
+    echo "--- 🖼️ Creating final boot.img ---"
+    # ملاحظة: استخدمنا --dt لدمج ملف الـ DT الذي سحبته
     ./toolchain/mkbootimg \
         --kernel $OUT_DIR/arch/arm/boot/zImage \
         --ramdisk $RAMDISK_OUT \
@@ -100,16 +105,16 @@ if [ -f $OUT_DIR/arch/arm/boot/zImage ]; then
         --pagesize $PAGESIZE \
         --kernel_offset $KERNEL_OFFSET \
         --ramdisk_offset $RAMDISK_OFFSET \
-        --second_offset $SECOND_OFFSET \
         --tags_offset $TAGS_OFFSET \
         -o $OUTPUT_BOOTIMG || abort
 
+    # 6.4 فحص الحجم النهائي
     echo "-----------------------------------------------"
-    echo "🎉 SUCCESS! boot.img is ready."
-    echo "Location: $OUTPUT_BOOTIMG"
-    du -h $OUTPUT_BOOTIMG
+    echo "🎉 SUCCESS! Your Kernel is ready."
+    echo "📍 Path: $OUTPUT_BOOTIMG"
+    echo "📊 Size: $(du -h $OUTPUT_BOOTIMG | cut -f1)"
     echo "-----------------------------------------------"
 else
-    echo "❌ BUILD FAILED! zImage not found."
+    echo "❌ ERROR: zImage was not generated. Build failed."
     abort
 fi
