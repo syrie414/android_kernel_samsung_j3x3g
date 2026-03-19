@@ -1,0 +1,38 @@
+name: Sync Build Folder
+
+on:
+  workflow_dispatch: # يسمح لك بتشغيل الأكشن يدوياً
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Your Repo
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Clone Source Folder
+        run: |
+          # إنشاء مجلد مؤقت وجلب ملفات المستودع المصدر
+          git clone --depth 1 https://github.com/linkit2me/J320h.git temp_repo
+          
+          # التأكد من وجود المجلد المطلوب ونسخه
+          if [ -d "temp_repo/build" ]; then
+            cp -r temp_repo/build .
+            echo "Build folder copied successfully."
+          else
+            echo "Build folder not found!"
+            exit 1
+          fi
+          
+          # حذف المجلد المؤقت
+          rm -rf temp_repo
+
+      - name: Commit and Push
+        run: |
+          git config --global user.name "GitHub Action"
+          git config --global user.email "action@github.com"
+          git add build/
+          git commit -m "Update build folder from source" || exit 0
+          git push origin master
