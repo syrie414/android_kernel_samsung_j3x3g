@@ -1,8 +1,9 @@
 #!/bin/bash
+set -euo pipefail
 
 # ======================================================
-# 🚀 Linkit2me Kernel Build Script - Boot Fixed Edition
-# Matched with Stock AIK Parameters for J320H
+# Linkit2me Kernel Build Script - No Stock DT Edition
+# J320H
 # ======================================================
 
 abort() {
@@ -12,111 +13,147 @@ abort() {
     exit 1
 }
 
+trap 'abort' ERR
+
 # --- 1. إعدادات الهوية والبيئة ---
 export ARCH=arm
+export SUBARCH=arm
 export KBUILD_BUILD_USER="imad"
 export KBUILD_BUILD_HOST="Linkit2me-Lab"
+
 OUT_DIR="out"
-mkdir -p $OUT_DIR
+mkdir -p "$OUT_DIR"
 
 # --- 2. إعداد المترجم (Toolchain) ---
-TOOLCHAIN_BIN=$PWD/toolchain/bin/arm-linux-androideabi-
-export CROSS_COMPILE=$TOOLCHAIN_BIN
+TOOLCHAIN_BIN="$PWD/toolchain/bin/arm-linux-androideabi-"
 
 if [ ! -f "${TOOLCHAIN_BIN}gcc" ]; then
-    echo "❌ Toolchain not found at $TOOLCHAIN_BIN"
+    echo "❌ Toolchain not found at ${TOOLCHAIN_BIN}"
     abort
 fi
+
+export CROSS_COMPILE="$TOOLCHAIN_BIN"
 
 if command -v ccache >/dev/null 2>&1; then
     export CCACHE_DIR="$PWD/.ccache"
     export CROSS_COMPILE="ccache $TOOLCHAIN_BIN"
 fi
 
-# --- 3. تعديل قيم الـ Boot الحساسة (مطابقة للـ AIK) ---
-# تم تغيير الـ BASE والـ SECOND والـ CMDLINE لضمان الإقلاع
+# --- 3. Boot parameters ---
 BASE=0x00000000
 KERNEL_OFFSET=0x00008000
 RAMDISK_OFFSET=0x01000000
 SECOND_OFFSET=0x00f00000
 TAGS_OFFSET=0x00000100
 PAGESIZE=2048
-# السطر الأصلي للجهاز مع إضافة permissive
 CMDLINE="console=ttyS1,115200n8 androidboot.selinux=permissive"
 
-BASE_CONFIG=j3x3g-dt_defconfig
-REC_CONFIG=recovery.config
+BASE_CONFIG="j3x3g-dt_defconfig"
+REC_CONFIG="recovery.config"
+
 RAMDISK_SRC="build/ramdisk"
 RAMDISK_OUT="$OUT_DIR/ramdisk.cpio.gz"
-DT_FILE="build/boot.img-dt" 
+
+DTB_DIR="$OUT_DIR/arch/arm/boot/dts"
+DTB_IMG="$OUT_DIR/dtb.img"
+
 OUTPUT_BOOTIMG="$OUT_DIR/boot.img"
+MKBOOTIMG="./toolchain/mkbootimg"
+
+JOBS="$(nproc --all 2>/dev/null || nproc)"
 
 # --- 4. التحضير والبناء ---
 echo "--- 🛠️ Preparing build environment ---"
-make O=$OUT_DIR mrproper || abort
-make O=$OUT_DIR $BASE_CONFIG || abort
+make O="$OUT_DIR" mrproper
+make O="$OUT_DIR" "$BASE_CONFIG"
 
-if [ -f arch/arm/configs/$REC_CONFIG ]; then
+if [ -f "arch/arm/configs/$REC_CONFIG" ]; then
     echo "--- 🩹 Applying Recovery patches ---"
-    cat arch/arm/configs/$REC_CONFIG >> $OUT_DIR/.config
-    make O=$OUT_DIR olddefconfig || abort
+    cat "arch/arm/configs/$REC_CONFIG" >> "$OUT_DIR/.config"
+    make O="$OUT_DIR" olddefconfig
 fi
 
 echo "--- ⚡ Starting Compilation ---"
-make O=$OUT_DIR KCFLAGS="-fcommon" HOSTCFLAGS="-fcommon" -j$(nproc --all) zImage dtbs || abort
+make O="$OUT_DIR" KCFLAGS="-fcommon" HOSTCFLAGS="-fcommon" -j"$JOBS" zImage dtbs
 
-# --- 5. بناء أداة mkbootimg ---
-build_tools() {
-    echo "--- 🛠️ Building mkbootimg from source ---"
-    rm -rf mkbootimg_src toolchain/mkbootimg
-    git clone https://github.com/osm0sis/mkbootimg.git mkbootimg_src || abort
-    cd mkbootimg_src
-    make CROSS_COMPILE= CC=gcc mkbootimg -j$(nproc --all) || abort
-    cp mkbootimg ../toolchain/mkbootimg
-    cd ..
-    rm -rf mkbootimg_src
-    chmod +x toolchain/mkbootimg
-}
-
-if [ ! -f "toolchain/mkbootimg" ] || [ "$(grep -c "404" toolchain/mkbootimg)" -gt 0 ]; then
-    build_tools
-fi
-
-# --- 6. تجميع الـ Image النهائي ببارامترات سامسونج ---
-echo "-----------------------------------------------"
-if [ -f $OUT_DIR/arch/arm/boot/zImage ]; then
-    echo "✅ Kernel built. Packing Boot Image..."
-
-    # ضغط الرام ديسك (تأكد أن مجلد build/ramdisk يحتوي ملفاتك)
-    if [ -d "$RAMDISK_SRC" ]; then
-        pushd $RAMDISK_SRC > /dev/null
-        find . ! -name . | LC_ALL=C sort | cpio -o -H newc -R root:root | gzip > ../../$RAMDISK_OUT || abort
-        popd > /dev/null
-    fi
-
-    # إنشاء البوت إيمج باستخدام القيم الجديدة
-    ./toolchain/mkbootimg \
-        --kernel $OUT_DIR/arch/arm/boot/zImage \
-        --ramdisk $RAMDISK_OUT \
-        --cmdline "$CMDLINE" \
-        --base $BASE \
-        --pagesize $PAGESIZE \
-        --kernel_offset $KERNEL_OFFSET \
-        --ramdisk_offset $RAMDISK_OFFSET \
-        --second_offset $SECOND_OFFSET \
-        --tags_offset $TAGS_OFFSET \
-        -o $OUTPUT_BOOTIMG || abort
-
-    # دمج الـ DT وتوقيع سامسونج (SEANDROIDENFORCE)
-    if [ -f "$DT_FILE" ]; then
-        echo "--- ➕ Appending Stock DTB & Signature ---"
-        cat $DT_FILE >> $OUTPUT_BOOTIMG
-        echo -n "SEANDROIDENFORCE" >> $OUTPUT_BOOTIMG
-    fi
-
-    echo "-----------------------------------------------"
-    echo "🎉 SUCCESS! boot.img is ready for J320H."
-    echo "-----------------------------------------------"
-else
+# --- 5. تجهيز DTB من ناتج الكيرنل نفسه ---
+echo "--- 📦 Packing DTB from kernel build output ---"
+if [ ! -d "$DTB_DIR" ]; then
+    echo "❌ DTB directory not found: $DTB_DIR"
     abort
 fi
+
+mapfile -d '' DTB_FILES < <(find "$DTB_DIR" -maxdepth 1 -name "*.dtb" -print0 | sort -z)
+if [ "${#DTB_FILES[@]}" -eq 0 ]; then
+    echo "❌ No dtb files found in $DTB_DIR"
+    abort
+fi
+
+cat "${DTB_FILES[@]}" > "$DTB_IMG"
+
+# --- 6. تجهيز الرامديسك ---
+if [ -d "$RAMDISK_SRC" ]; then
+    echo "--- 📦 Packing ramdisk ---"
+    (
+        cd "$RAMDISK_SRC"
+        find . | LC_ALL=C sort | cpio -o -H newc -R root:root
+    ) | gzip -9n > "$RAMDISK_OUT"
+else
+    echo "❌ Ramdisk folder not found: $RAMDISK_SRC"
+    abort
+fi
+
+# --- 7. التحقق من mkbootimg ---
+if [ ! -x "$MKBOOTIMG" ]; then
+    echo "❌ mkbootimg not found or not executable at $MKBOOTIMG"
+    abort
+fi
+
+# --- 8. اختيار kernel image ---
+KERNEL_IMAGE="$OUT_DIR/arch/arm/boot/zImage"
+USE_DTB_ARG=1
+
+if [ -f "$OUT_DIR/arch/arm/boot/zImage-dtb" ]; then
+    echo "--- ✅ Found zImage-dtb, using appended DTB kernel image ---"
+    KERNEL_IMAGE="$OUT_DIR/arch/arm/boot/zImage-dtb"
+    USE_DTB_ARG=0
+fi
+
+# --- 9. إنشاء boot.img ---
+echo "-----------------------------------------------"
+echo "✅ Kernel built. Packing Boot Image..."
+
+if [ "$USE_DTB_ARG" -eq 1 ]; then
+    "$MKBOOTIMG" \
+        --kernel "$KERNEL_IMAGE" \
+        --ramdisk "$RAMDISK_OUT" \
+        --dt "$DTB_IMG" \
+        --cmdline "$CMDLINE" \
+        --base "$BASE" \
+        --pagesize "$PAGESIZE" \
+        --kernel_offset "$KERNEL_OFFSET" \
+        --ramdisk_offset "$RAMDISK_OFFSET" \
+        --second_offset "$SECOND_OFFSET" \
+        --tags_offset "$TAGS_OFFSET" \
+        -o "$OUTPUT_BOOTIMG"
+else
+    "$MKBOOTIMG" \
+        --kernel "$KERNEL_IMAGE" \
+        --ramdisk "$RAMDISK_OUT" \
+        --cmdline "$CMDLINE" \
+        --base "$BASE" \
+        --pagesize "$PAGESIZE" \
+        --kernel_offset "$KERNEL_OFFSET" \
+        --ramdisk_offset "$RAMDISK_OFFSET" \
+        --second_offset "$SECOND_OFFSET" \
+        --tags_offset "$TAGS_OFFSET" \
+        -o "$OUTPUT_BOOTIMG"
+fi
+
+# --- 10. توقيع سامسونج ---
+echo "--- ➕ Appending SEANDROIDENFORCE signature ---"
+echo -n "SEANDROIDENFORCE" >> "$OUTPUT_BOOTIMG"
+
+echo "-----------------------------------------------"
+echo "🎉 SUCCESS! boot.img is ready for J320H."
+echo "-----------------------------------------------"
