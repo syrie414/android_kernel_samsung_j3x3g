@@ -3,7 +3,7 @@ name: Build Linkit2me Kernel (J320H)
 on:
   push:
     branches: [ master ]
-  workflow_dispatch: 
+  workflow_dispatch:
 
 jobs:
   build:
@@ -20,21 +20,26 @@ jobs:
       run: |
         export DEBIAN_FRONTEND=noninteractive
         apt-get update
-        apt-get install -y git curl sudo
+
         dpkg --add-architecture i386
         apt-get update
-        apt-get install -y build-essential bc bison flex libssl-dev libelf-dev zip \
-          gcc-multilib g++-multilib libc6-dev-i386 lib32ncurses5-dev lib32z1-dev python2 cpio
+
+        apt-get install -y \
+          git curl sudo build-essential bc bison flex \
+          libssl-dev libelf-dev zip \
+          gcc-multilib g++-multilib \
+          libc6-dev-i386 lib32ncurses5-dev lib32z1-dev \
+          libncurses5 libncurses5-dev \
+          python2 cpio
+
         ln -sf /usr/bin/python2 /usr/bin/python
 
     - name: Manual Toolchain Setup
       run: |
-        # تحميل المترجم في المجلد المتوقع من قبل build.sh
-        git clone https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.9 -b android-wear-5.1.0_r1 --depth=1 toolchain
+        git clone https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.9 \
+          -b android-wear-5.1.0_r1 --depth=1 toolchain
+
         chmod -R +x toolchain/bin/
-        # تحميل أداة mkbootimg لتكون جاهزة للسكربت
-        curl -sL https://raw.githubusercontent.com/osm0sis/mkbootimg/master/mkbootimg -o toolchain/mkbootimg
-        chmod +x toolchain/mkbootimg
 
     - name: Fix Legacy Scripts
       run: |
@@ -43,9 +48,14 @@ jobs:
 
     - name: Run Build Script
       run: |
-        # إعطاء صلاحية التنفيذ وتشغيل السكربت
         chmod +x build.sh
-        ./build.sh
+        ./build.sh 2>&1 | tee build.log
+
+    - name: Upload Build Logs
+      uses: actions/upload-artifact@v4
+      with:
+        name: build-logs
+        path: build.log
 
     - name: Upload Boot Image
       uses: actions/upload-artifact@v4
@@ -53,21 +63,28 @@ jobs:
         name: J320H-Boot-Image
         path: out/boot.img
 
-    - name: Package with AnyKernel3 (Optional)
+    - name: Package with AnyKernel3 (Clean Boot.img Method)
       run: |
         git clone https://github.com/osm0sis/AnyKernel3 --depth=1 AnyKernel
+
+        # تعطيل فحص الجهاز
         sed -i 's/do.devicecheck=1/do.devicecheck=0/g' AnyKernel/anykernel.sh
+
+        # تحديد البارتشن الصحيح
         sed -i 's|block=.*|block=/dev/block/platform/sdio_emmc/by-name/BOOT;|g' AnyKernel/anykernel.sh
-        
+
+        # أهم تعديل: استخدام boot.img مباشرة
+        sed -i 's|kernel.string=.*|kernel.string=Linkit2me-J320H;|g' AnyKernel/anykernel.sh
+
         if [ -f out/boot.img ]; then
-          # في J320H أحياناً نضع الـ boot.img كاملاً داخل AnyKernel أو الـ zImage فقط
-          # هنا سنعتمد وضع الـ zImage و الـ dtb كما هو معتاد
-          cp out/arch/arm/boot/zImage AnyKernel/zImage
-          # إذا كان هناك ملف DTB ناتج ننسخه أيضاً
-          find out/arch/arm/boot/dts/ -name "*.dtb" -exec cp {} AnyKernel/dtb \; || true
-          
-          cd AnyKernel && zip -r9 "../Linkit2me-J320H-Kernel-AnyKernel.zip" * -x .git README.md
+          cp out/boot.img AnyKernel/boot.img
+        else
+          echo "❌ boot.img not found!"
+          exit 1
         fi
+
+        cd AnyKernel
+        zip -r9 "../Linkit2me-J320H-Kernel-AnyKernel.zip" * -x .git README.md
 
     - name: Upload Flashable Zip
       uses: actions/upload-artifact@v4
