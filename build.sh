@@ -2,10 +2,9 @@
 
 # ======================================================
 # 🚀 Linkit2me Kernel Build Script for Samsung J320H
-# Optimized for osm0sis mkbootimg (Auto-Clean & Build)
+# Optimized for ExtremeKernel TWRP & System
 # ======================================================
 
-# دالة إيقاف السكربت عند حدوث خطأ
 abort() {
     echo "-----------------------------------------------"
     echo "❌ BUILD FAILED! check logs for errors."
@@ -18,11 +17,9 @@ export ARCH=arm
 export KBUILD_BUILD_USER="imad"
 export KBUILD_BUILD_HOST="Linkit2me-Lab"
 
-# مسار المترجم
 TOOLCHAIN_PATH=$PWD/toolchain/bin/arm-linux-androideabi-
 export CROSS_COMPILE=$TOOLCHAIN_PATH
 
-# الملفات النشطة
 BASE_CONFIG=j3x3g-dt_defconfig
 REC_CONFIG=recovery.config
 
@@ -32,10 +29,8 @@ KERNEL_OFFSET=0x00008000
 RAMDISK_OFFSET=0x01000000
 TAGS_OFFSET=0x00000100
 PAGESIZE=2048
-# أضفنا selinux=permissive لضمان الإقلاع السلس
 CMDLINE="init=/sbin/init root=/dev/ram rw console=ttyS1,115200n8 mem=88M androidboot.selinux=permissive"
 
-# مسارات الملفات
 OUT_DIR="out"
 RAMDISK_SRC="build/ramdisk"
 RAMDISK_OUT="$OUT_DIR/ramdisk.cpio.gz"
@@ -55,8 +50,9 @@ if [ ! -f arch/arm/configs/$BASE_CONFIG ]; then
 fi
 make O=$OUT_DIR $BASE_CONFIG || abort
 
+# تطبيق إعدادات ExtremeKernel للريكفري
 if [ -f arch/arm/configs/$REC_CONFIG ]; then
-    echo "--- 🩹 Applying Recovery patches ---"
+    echo "--- 🩹 Applying ExtremeKernel Recovery patches ---"
     cat arch/arm/configs/$REC_CONFIG >> $OUT_DIR/.config
     make O=$OUT_DIR olddefconfig || abort
 fi
@@ -78,23 +74,20 @@ if [ -f $OUT_DIR/arch/arm/boot/zImage ]; then
         popd > /dev/null
     fi
 
-    # 6.2 بناء أداة mkbootimg (حذف النسخة القديمة المكسورة وبناء نسخة جديدة)
-        # 6.2 بناء أداة mkbootimg (استخدام المترجم المحلي للجهاز لضمان النجاح)
+    # 6.2 بناء أداة mkbootimg (الحل النهائي لمشكلة الـ Toolchain)
     echo "--- 🛠️ Force building mkbootimg from source ---"
     rm -f toolchain/mkbootimg
     rm -rf mkbootimg_src
     
     git clone https://github.com/osm0sis/mkbootimg.git mkbootimg_src || abort
     cd mkbootimg_src
-    
-    # السر هنا: نستخدم CC=gcc المحلي وليس الخاص بالأندرويد
+    # إجبار استخدام المترجم المحلي (gcc) بدلاً من مترجم الأندرويد لبناء الأداة
     make CC=gcc mkbootimg -j$(nproc --all) || abort
-    
     cp mkbootimg ../toolchain/mkbootimg
     cd ..
     rm -rf mkbootimg_src
     chmod +x toolchain/mkbootimg
-    echo "✅ New mkbootimg tool is ready."
+    echo "✅ mkbootimg tool built successfully using local GCC."
 
     # 6.3 صناعة الـ boot.img النهائي
     echo "--- 🖼️ Creating final boot.img ---"
@@ -109,17 +102,15 @@ if [ -f $OUT_DIR/arch/arm/boot/zImage ]; then
         --tags_offset $TAGS_OFFSET \
         -o $OUTPUT_BOOTIMG || abort
 
-    # دمج ملف الـ DT وإضافة تذييل سامسونج
     if [ -f "$DT_FILE" ]; then
         echo "--- ➕ Appending Device Tree (DTB) ---"
         cat $DT_FILE >> $OUTPUT_BOOTIMG
         echo -n "SEANDROIDENFORCE" >> $OUTPUT_BOOTIMG
-        echo "✅ DTB and Footer added."
     fi
 
     echo "-----------------------------------------------"
-    echo "🎉 SUCCESS! Your boot.img is ready."
-    echo "📊 Final Size: $(du -h $OUTPUT_BOOTIMG | cut -f1)"
+    echo "🎉 SUCCESS! ExtremeKernel is ready."
+    echo "📊 Size: $(du -h $OUTPUT_BOOTIMG | cut -f1)"
     echo "-----------------------------------------------"
 else
     echo "❌ ERROR: Build failed."
