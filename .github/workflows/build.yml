@@ -37,33 +37,42 @@ jobs:
           sed -i 's/^YYLTYPE yylloc;/extern YYLTYPE yylloc;/' scripts/dtc/dtc-lexer.lex.c_shipped || true
           sed -i 's/^YYLTYPE yylloc;/extern YYLTYPE yylloc;/' scripts/dtc/dtc-lexer.l || true
 
-      - name: Build Kernel
+      - name: Build Kernel & DTB
         run: |
-          chmod +x build.sh
-          ./build.sh 2>&1 | tee build.log
+          export ARCH=arm
+          export CROSS_COMPILE=$(pwd)/toolchain/bin/arm-linux-androideabi-
+          
+          # إعداد الكونفيج (تأكد من اسم الملف في arch/arm/configs)
+          make j3x3g-dt_defconfig
+          
+          # البناء (zImage للكيرنل و dtbs لملفات الشجرة)
+          make -j$(nproc) zImage dtbs
 
-      - name: Upload Build Logs
-        uses: actions/upload-artifact@v4
-        with:
-          name: build-logs
-          path: build.log
-
-      - name: Package Kernel in AnyKernel
+      - name: Package in AnyKernel3
         run: |
-          git clone https://github.com/syrie414/AnyKernel3 --depth=1 AnyKernel
+          git clone https://github.com/osm0sis/AnyKernel3 --depth=1 AnyKernel
+          
+          # إعدادات anykernel.sh الأساسية
+          sed -i 's/do.devicecheck=1/do.devicecheck=0/g' AnyKernel/anykernel.sh
+          sed -i 's|kernel.string=.*|kernel.string=Linkit2me-J320H-Kernel;|g' AnyKernel/anykernel.sh
+          sed -i 's|block=/dev/block/.*|block=/dev/block/platform/sdio_emmc/by-name/BOOT;|g' AnyKernel/anykernel.sh
+          
+          # --- الجزء السحري: التعامل مع DTB المنفصل ---
+          # نقوم بجمع ملفات dtb الناتجة في ملف واحد اسمه 'dtb' (بدون امتداد)
+          # هذا الملف سيضعه AnyKernel في مكان boot.img-dt الذي رأيته في AIK
+          cat arch/arm/boot/dts/*.dtb > AnyKernel/dtb
 
-          # تعطيل فحص الجهاز
-          sed -i 's/do.devicecheck=1/do.devicecheck=0/g' AnyKernel/anykernel.sh || true
-          sed -i 's|kernel.string=.*|kernel.string=Linkit2me-J320H;|g' AnyKernel/anykernel.sh || true
-
-          # نسخ zImage مباشرة كـ boot.img
-          cp -f out/arch/arm/boot/zImage AnyKernel/boot.img
-
+          # نسخ الكيرنل الخام
+          cp -f arch/arm/boot/zImage AnyKernel/zImage
+          
+          # إضافة توقيع سامسونج (SEANDROIDENFORCE)
+          echo -n "SEANDROIDENFORCE" >> AnyKernel/zImage
+          
           cd AnyKernel
-          zip -r9 "../Linkit2me-J320H-Kernel-AnyKernel.zip" . -x ".git/*" "README.md"
+          zip -r9 "../Linkit2me-J320H-Final.zip" . -x ".git/*" "README.md"
 
-      - name: Upload Flashable Zip
+      - name: Upload Final Kernel Zip
         uses: actions/upload-artifact@v4
         with:
-          name: Linkit2me_J320H_Zip
-          path: Linkit2me-J320H-Kernel-AnyKernel.zip
+          name: Linkit2me_J320H_Kernel
+          path: Linkit2me-J320H-Final.zip
