@@ -53,12 +53,17 @@ jobs:
           sed -i 's/CONFIG_CMDLINE_FORCE=n/CONFIG_CMDLINE_FORCE=y/g' .config || echo "CONFIG_CMDLINE_FORCE=y" >> .config
           sed -i 's|CONFIG_CMDLINE=.*|CONFIG_CMDLINE="console=tty0 androidboot.selinux=permissive earlyprintk"|g' .config
           
-          # 3. تفعيل الـ Early Printk
+          # 3. تفعيل الـ Early Printk مع تحديد الـ UART الافتراضي
           echo "CONFIG_DEBUG_LL=y" >> .config
+          echo "CONFIG_DEBUG_LL_UART_NONE=y" >> .config
           echo "CONFIG_EARLY_PRINTK=y" >> .config
+          
+          # 🌟 السر هنا: الإجابة بـ Enter على أي سؤال يسأله الكومبايلر كي لا يتوقف
+          yes "" | make oldconfig
           
           # 4. بناء الكيرنل
           make -j$(nproc) zImage dtbs
+
 
       - name: Package with Appended DTB
         run: |
