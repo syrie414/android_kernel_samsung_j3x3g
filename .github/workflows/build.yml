@@ -38,18 +38,30 @@ jobs:
           sed -i 's/^YYLTYPE yylloc;/extern YYLTYPE yylloc;/' scripts/dtc/dtc-lexer.lex.c_shipped || true
           sed -i 's/^YYLTYPE yylloc;/extern YYLTYPE yylloc;/' scripts/dtc/dtc-lexer.l || true
 
-      - name: Build Kernel & DTB
+      - name: Build Kernel (Fixing Jump & Console)
         run: |
           export ARCH=arm
           export CROSS_COMPILE=$(pwd)/toolchain/bin/arm-linux-androideabi-
           
-          # تنظيف وبناء باستخدام الكونفيج الصحيح لجهازك
-          make clean
-          make mrproper
           make j3x3g-dt_defconfig
           
-          # بناء الكيرنل (zImage) وملفات شجرة الأجهزة (dtbs)
+          # 1. إجبار الكيرنل على استخدام عنوان البداية الصحيح لسامسونج
+          # أجهزة J320H تبدأ الذاكرة فيها غالباً من 0x80000000
+          echo "CONFIG_MEMORY_START=0x80000000" >> .config
+          echo "CONFIG_PHYS_OFFSET=0x80000000" >> .config
+
+          # 2. كسر صمت الكونسول (حل الـ console=null)
+          sed -i 's/CONFIG_CMDLINE_BOOL=n/CONFIG_CMDLINE_BOOL=y/g' .config
+          sed -i 's/CONFIG_CMDLINE_FORCE=y/CONFIG_CMDLINE_FORCE=y/g' .config
+          sed -i 's|CONFIG_CMDLINE=.*|CONFIG_CMDLINE="console=tty0 androidboot.selinux=permissive earlyprintk"|g' .config
+          
+          # 3. تفعيل الـ Early Printk (لكي يظهر لنا الخطأ على الشاشة فوراً)
+          echo "CONFIG_DEBUG_LL=y" >> .config
+          echo "CONFIG_EARLY_PRINTK=y" >> .config
+          
+          # 4. بناء الكيرنل والـ DTB
           make -j$(nproc) zImage dtbs
+
 
       - name: Package in AnyKernel3
         run: |
@@ -76,6 +88,16 @@ jobs:
           # ضغط الملف النهائي
           cd AnyKernel
           zip -r9 "../Linkit2me-J320H-Flashable.zip" . -x ".git/*" "README.md"
+      - name: Manual DTB Append
+        run: |
+          # دمج الكيرنل مع كل ملفات الـ dtb الناتجة
+          cat arch/arm/boot/zImage arch/arm/boot/dts/*.dtb > AnyKernel/zImage
+          
+          # إضافة التوقيع
+          echo -n "SEANDROIDENFORCE" >> AnyKernel/zImage
+          
+          # ملاحظة: لا تضع ملف باسم dtb في مجلد AnyKernel هذه المرة، 
+          # دع الأداة تستخدم الـ zImage المدمج فقط.
 
       - name: Upload Final Flashable Zip
         uses: actions/upload-artifact@v4
