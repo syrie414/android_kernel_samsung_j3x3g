@@ -34,6 +34,7 @@ jobs:
 
       - name: Fix Legacy Scripts
         run: |
+          # إصلاح أخطاء التوافق مع النسخ الحديثة من Bison/Flex
           sed -i 's/^YYLTYPE yylloc;/extern YYLTYPE yylloc;/' scripts/dtc/dtc-lexer.lex.c_shipped || true
           sed -i 's/^YYLTYPE yylloc;/extern YYLTYPE yylloc;/' scripts/dtc/dtc-lexer.l || true
 
@@ -42,37 +43,42 @@ jobs:
           export ARCH=arm
           export CROSS_COMPILE=$(pwd)/toolchain/bin/arm-linux-androideabi-
           
-          # إعداد الكونفيج (تأكد من اسم الملف في arch/arm/configs)
+          # تنظيف وبناء باستخدام الكونفيج الصحيح لجهازك
+          make clean
+          make mrproper
           make j3x3g-dt_defconfig
           
-          # البناء (zImage للكيرنل و dtbs لملفات الشجرة)
+          # بناء الكيرنل (zImage) وملفات شجرة الأجهزة (dtbs)
           make -j$(nproc) zImage dtbs
 
       - name: Package in AnyKernel3
         run: |
+          # جلب أداة AnyKernel3 الرسمية
           git clone https://github.com/osm0sis/AnyKernel3 --depth=1 AnyKernel
           
-          # إعدادات anykernel.sh الأساسية
+          # إعداد السكريبت ليتناسب مع J320H
           sed -i 's/do.devicecheck=1/do.devicecheck=0/g' AnyKernel/anykernel.sh
-          sed -i 's|kernel.string=.*|kernel.string=Linkit2me-J320H-Kernel;|g' AnyKernel/anykernel.sh
+          sed -i 's|kernel.string=.*|kernel.string=Linkit2me-J320H-Final;|g' AnyKernel/anykernel.sh
+          
+          # تحديد مسار بارتشن الـ BOOT (تأكد من الاسم كابيتال لسامسونج)
           sed -i 's|block=/dev/block/.*|block=/dev/block/platform/sdio_emmc/by-name/BOOT;|g' AnyKernel/anykernel.sh
           
-          # --- الجزء السحري: التعامل مع DTB المنفصل ---
-          # نقوم بجمع ملفات dtb الناتجة في ملف واحد اسمه 'dtb' (بدون امتداد)
-          # هذا الملف سيضعه AnyKernel في مكان boot.img-dt الذي رأيته في AIK
+          # --- معالجة الـ DTB المنفصل ---
+          # نجمع كل ملفات الـ dtb الناتجة في ملف واحد اسمه 'dtb' ليفهمه AnyKernel
           cat arch/arm/boot/dts/*.dtb > AnyKernel/dtb
 
-          # نسخ الكيرنل الخام
+          # نسخ الكيرنل الخام (zImage)
           cp -f arch/arm/boot/zImage AnyKernel/zImage
           
-          # إضافة توقيع سامسونج (SEANDROIDENFORCE)
+          # إضافة توقيع سامسونج الإجباري (SEANDROIDENFORCE)
           echo -n "SEANDROIDENFORCE" >> AnyKernel/zImage
           
+          # ضغط الملف النهائي
           cd AnyKernel
-          zip -r9 "../Linkit2me-J320H-Final.zip" . -x ".git/*" "README.md"
+          zip -r9 "../Linkit2me-J320H-Flashable.zip" . -x ".git/*" "README.md"
 
-      - name: Upload Final Kernel Zip
+      - name: Upload Final Flashable Zip
         uses: actions/upload-artifact@v4
         with:
           name: Linkit2me_J320H_Kernel
-          path: Linkit2me-J320H-Final.zip
+          path: Linkit2me-J320H-Flashable.zip
