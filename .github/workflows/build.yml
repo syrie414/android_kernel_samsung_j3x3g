@@ -34,7 +34,6 @@ jobs:
 
       - name: Fix Legacy Scripts
         run: |
-          # إصلاح أخطاء التوافق مع النسخ الحديثة من Bison/Flex
           sed -i 's/^YYLTYPE yylloc;/extern YYLTYPE yylloc;/' scripts/dtc/dtc-lexer.lex.c_shipped || true
           sed -i 's/^YYLTYPE yylloc;/extern YYLTYPE yylloc;/' scripts/dtc/dtc-lexer.l || true
 
@@ -45,59 +44,43 @@ jobs:
           
           make j3x3g-dt_defconfig
           
-          # 1. إجبار الكيرنل على استخدام عنوان البداية الصحيح لسامسونج
-          # أجهزة J320H تبدأ الذاكرة فيها غالباً من 0x80000000
+          # 1. إجبار الكيرنل على استخدام عنوان البداية الصحيح
           echo "CONFIG_MEMORY_START=0x80000000" >> .config
           echo "CONFIG_PHYS_OFFSET=0x80000000" >> .config
 
-          # 2. كسر صمت الكونسول (حل الـ console=null)
-          sed -i 's/CONFIG_CMDLINE_BOOL=n/CONFIG_CMDLINE_BOOL=y/g' .config
-          sed -i 's/CONFIG_CMDLINE_FORCE=y/CONFIG_CMDLINE_FORCE=y/g' .config
+          # 2. كسر صمت الكونسول
+          sed -i 's/CONFIG_CMDLINE_BOOL=n/CONFIG_CMDLINE_BOOL=y/g' .config || echo "CONFIG_CMDLINE_BOOL=y" >> .config
+          sed -i 's/CONFIG_CMDLINE_FORCE=n/CONFIG_CMDLINE_FORCE=y/g' .config || echo "CONFIG_CMDLINE_FORCE=y" >> .config
           sed -i 's|CONFIG_CMDLINE=.*|CONFIG_CMDLINE="console=tty0 androidboot.selinux=permissive earlyprintk"|g' .config
           
-          # 3. تفعيل الـ Early Printk (لكي يظهر لنا الخطأ على الشاشة فوراً)
+          # 3. تفعيل الـ Early Printk
           echo "CONFIG_DEBUG_LL=y" >> .config
           echo "CONFIG_EARLY_PRINTK=y" >> .config
           
-          # 4. بناء الكيرنل والـ DTB
+          # 4. بناء الكيرنل
           make -j$(nproc) zImage dtbs
 
-
-      - name: Package in AnyKernel3
+      - name: Package with Appended DTB
         run: |
-          # جلب أداة AnyKernel3 الرسمية
-          git clone https://github.com/osm0sis/AnyKernel3 --depth=1 AnyKernel
+          git clone https://github.com/syrie414/AnyKernel3 --depth=1 AnyKernel
           
-          # إعداد السكريبت ليتناسب مع J320H
+          # إعداد السكريبت ومسار البلوك الصحيح لـ J320H
           sed -i 's/do.devicecheck=1/do.devicecheck=0/g' AnyKernel/anykernel.sh
           sed -i 's|kernel.string=.*|kernel.string=Linkit2me-J320H-Final;|g' AnyKernel/anykernel.sh
+          sed -i 's|block=/dev/block/.*|block=/dev/block/mmcblk0p20;|g' AnyKernel/anykernel.sh
           
-          # تحديد مسار بارتشن الـ BOOT (تأكد من الاسم كابيتال لسامسونج)
-          sed -i 's|block=/dev/block/.*|block=/dev/block/platform/sdio_emmc/by-name/BOOT;|g' AnyKernel/anykernel.sh
-          
-          # --- معالجة الـ DTB المنفصل ---
-          # نجمع كل ملفات الـ dtb الناتجة في ملف واحد اسمه 'dtb' ليفهمه AnyKernel
-          cat arch/arm/boot/dts/*.dtb > AnyKernel/dtb
-
-          # نسخ الكيرنل الخام (zImage)
-          cp -f arch/arm/boot/zImage AnyKernel/zImage
-          
-          # إضافة توقيع سامسونج الإجباري (SEANDROIDENFORCE)
-          echo -n "SEANDROIDENFORCE" >> AnyKernel/zImage
-          
-          # ضغط الملف النهائي
-          cd AnyKernel
-          zip -r9 "../Linkit2me-J320H-Flashable.zip" . -x ".git/*" "README.md"
-      - name: Manual DTB Append
-        run: |
-          # دمج الكيرنل مع كل ملفات الـ dtb الناتجة
+          # دمج الكيرنل مع الـ DTB 
           cat arch/arm/boot/zImage arch/arm/boot/dts/*.dtb > AnyKernel/zImage
           
-          # إضافة التوقيع
+          # إضافة توقيع سامسونج في النهاية
           echo -n "SEANDROIDENFORCE" >> AnyKernel/zImage
           
-          # ملاحظة: لا تضع ملف باسم dtb في مجلد AnyKernel هذه المرة، 
-          # دع الأداة تستخدم الـ zImage المدمج فقط.
+          # تنظيف لتجنب التضارب
+          rm -f AnyKernel/dtb
+          
+          # الضغط (الخطوة الأخيرة دائماً)
+          cd AnyKernel
+          zip -r9 "../Linkit2me-J320H-Flashable.zip" . -x ".git/*" "README.md"
 
       - name: Upload Final Flashable Zip
         uses: actions/upload-artifact@v4
