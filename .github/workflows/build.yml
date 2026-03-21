@@ -62,7 +62,7 @@ jobs:
 
       - name: Package with Appended DTB
         run: |
-          git clone https://github.com/syrie414/AnyKernel3 --depth=1 AnyKernel
+          git clone https://github.com/osm0sis/AnyKernel3 --depth=1 AnyKernel
           
           # إعداد السكريبت ومسار البلوك الصحيح لـ J320H
           sed -i 's/do.devicecheck=1/do.devicecheck=0/g' AnyKernel/anykernel.sh
